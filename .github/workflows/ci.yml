@@ -25,10 +25,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: pip install yamllint
-      - run: yamllint -d "{extends: relaxed, rules: {line-length: disable, indentation: disable, empty-lines: disable, trailing-spaces: disable, new-line-at-end-of-file: disable}}" .
+      - run: |
+          yamllint -d "{extends: relaxed, rules: {line-length: disable, indentation: disable, empty-lines: disable, trailing-spaces: disable, new-line-at-end-of-file: disable}}" .
 
   python:
-    name: Python check (ruff: syntax errors and undefined names)
+    name: Python check (ruff, syntax errors and undefined names)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
