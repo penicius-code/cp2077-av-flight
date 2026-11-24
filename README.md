@@ -9,6 +9,13 @@ Version 1.0.0 build 16 | For game version 2.5 | Status: builds 7, 8, 9, 11 and 1
 <img src="docs/media/summon.gif" width="400" alt="A chartered aircraft descends from the sky and lands next to the player">
 <img src="docs/media/interior.gif" width="400" alt="Inside the aircraft cabin while the autopilot flies over the city at night">
 </p>
+<p>
+<img src="docs/media/city-cruise.gif" width="400" alt="Cruising over the city">
+<img src="docs/media/landing-on-pad.gif" width="400" alt="Landing on a pad">
+</p>
+<p>
+<img src="docs/media/sim-step.png" width="560" alt="Offline simulation of the speed controller: holding W for 4 s raises the target speed, and the simulated speed settles on it without overshoot while acceleration ramps under the jerk limit">
+</p>
 
 **This repository is source, not a ready-to-install package.** The mod needs the flight-physics DLL and aircraft archive of another author's mod, which you download yourself, and one data file that you generate from that download with a script included here. See Install.
 
@@ -157,15 +164,6 @@ Checked for this repository on 2026-11-24:
 **The autopilot that flew into buildings.** The first autopilot only used forward ray checks, which did not report buildings in time. The second reads a height map and was flown in a route simulator over the real map before it was installed.
 
 **Rollback.** Each build was installed by a script that kept the previous files and had a revert switch. For a user: delete two folders.
-
-## Media
-
-<p>
-<img src="docs/media/city-cruise.gif" width="400" alt="Cruising over the city">
-<img src="docs/media/landing-on-pad.gif" width="400" alt="Landing on a pad">
-</p>
-
-![Offline simulation of the speed controller: holding W for 4 s raises the target speed, and the simulated speed settles on it without overshoot while acceleration ramps under the jerk limit](docs/media/sim-step.png)
 
 ## Changelog
 
