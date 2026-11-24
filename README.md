@@ -25,7 +25,7 @@ Two existing flight mods were installed, 17 MB and 77 MB. One brought 600 KB of 
 
 ## What I built
 
-A flight mod in redscript, about 4,500 hand-written lines in nine files, that runs only while an aircraft exists or you pilot one. It wraps four game functions: the player's mount and unmount events and two exit-direction checks. It reuses the native physics DLL and the aircraft models of one of those mods and replaces everything else. It changes: how six aircraft (four AVs, two helicopters) and one quest helicopter are controlled while you sit in the pilot seat, and it adds a charter service with a bill.
+A flight mod in redscript, about 4,500 lines in nine files (not counting the generated data files), that runs only while an aircraft exists or you pilot one. It wraps four game functions: the player's mount and unmount events and two exit-direction checks. It reuses the native physics DLL and the aircraft models of one of those mods and replaces everything else. It changes: how six aircraft (four AVs, two helicopters) and one quest helicopter are controlled while you sit in the pilot seat, and it adds a charter service with a bill.
 
 ## How it works
 
