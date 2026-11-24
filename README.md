@@ -5,6 +5,8 @@ Version 1.0.0 build 16 | For game version 2.5 | Status: builds 7, 8, 9, 11 and 1
 
 > This is an unofficial fan work and is not approved/endorsed by CD PROJEKT RED. No game files are included.
 
+![A chartered aircraft descends from the sky and lands next to the player](docs/media/summon.gif)
+
 **This repository is source, not a ready-to-install package.** The mod needs the flight-physics DLL and aircraft archive of another author's mod, which you download yourself, and one data file that you generate from that download with a script included here. See Install.
 
 ## The problem
@@ -154,6 +156,10 @@ Checked for this repository on 2026-11-24:
 **Rollback.** Each build was installed by a script that kept the previous files and had a revert switch. For a user: delete two folders.
 
 ## Media
+
+![Cruising over the city](docs/media/city-cruise.gif)
+
+![Landing on a pad](docs/media/landing-on-pad.gif)
 
 ![Offline simulation of the speed controller: holding W for 4 s raises the target speed, and the simulated speed settles on it without overshoot while acceleration ramps under the jerk limit](docs/media/sim-step.png)
 
