@@ -3,6 +3,8 @@
 Charter and fly aircraft in Cyberpunk 2077: a fly-by-wire flight controller, paid charter and an autopilot to the tracked map pin. Single-player only.
 Version 1.0.0 build 16 | For game version 2.5 | Status: builds 7, 8, 9, 11 and 13 flown in game; builds 12 and 14 to 16 compile and are not yet flown; installing from this repository has not been tested on a clean setup
 
+**Download:** [latest release](https://github.com/penicius-code/cp2077-av-flight/releases/latest) (zip; install steps below)
+
 > This is an unofficial fan work and is not approved/endorsed by CD PROJEKT RED. No game files are included.
 
 <p>
@@ -78,7 +80,7 @@ Not tested on a clean setup; these steps describe the layout the mod was develop
 
 1. Install the frameworks above.
 2. From your download of Drive an Aerial Vehicle 3.5.0, copy only two files into the game folder: `red4ext\plugins\DriveAerialVehicle\DriveAerialVehicle.dll` and its `.archive` file into `archive\pc\mod\`. Do not install the rest of that mod: its own Lua part controls the same DLL, and the two would fight over it.
-3. Copy the `r6` folder from `package/` into the game folder.
+3. Download the zip from the [latest release](https://github.com/penicius-code/cp2077-av-flight/releases/latest) (the same files as `package/` in this repository) and extract it into the game folder.
 4. Generate the height map from that mod's obstacle map (the `Data\map_bin` folder in its download):
    ```text
    set DAV_MAP_DIR=<path to>\DriveAerialVehicle\Data\map_bin
