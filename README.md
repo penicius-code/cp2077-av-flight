@@ -1,7 +1,7 @@
 # Cyberslop AV Flight
 
 Charter and fly aircraft in Cyberpunk 2077: a fly-by-wire flight controller, paid charter and an autopilot to the tracked map pin. Single-player only.
-Version 1.0.0 build 19 | For game version 2.5 | Status: builds 7, 8, 9, 11 and 13 flown in game; builds 12 and 14 to 19 compile and are flown in game, not extensively; installing from this repository has not been tested on a clean setup
+Version 1.0.0 build 19 | For game version 2.5 | Status: builds 7, 8, 9, 11 and 13 flown in game; builds 12 and 14 to 19 compile and are flown in game; installing from this repository has not been tested on a clean setup
 
 **Download:** [latest release](https://github.com/penicius-code/cp2077-av-flight/releases/latest) (zip; install steps below)
 
