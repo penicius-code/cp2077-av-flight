@@ -2,6 +2,26 @@
 
 Version 1.0.0 was developed in numbered builds on game version 2.5. "Flown" means the build was flown in game; "not flown" means compile-checked only.
 
+## build 19 - 2026-11-28
+### Changed
+- The charter lands side-on with its left (door) side towards you, the hull side about 3 m from your feet at your own level (then 5.5 m, then the old 14 to 32 m rings). It turns to that heading while still 8 m or more up and never comes down while you stand under the hull.
+- Touchdown without the twitch: a steady 0.4 m/s sink for the last 0.9 m, and the aircraft is handed back to the game as soon as the gear stands on the ground (before, it waited until it was within 4 cm of a remembered resting height that changed between landings). Applies to arrival, fetch, your own landings and the autopilot's pin landing. Letting go of the controls less than 0.5 m over the ground settles it by itself.
+- The front-left door opens when you walk up to it and closes when you walk away; take-off, send-away and the fetch close it.
+- Getting out in the air puts you beside the hull, 1.3 m clear of its side, and you fall; before, you were left standing on the roof.
+- Double tap `K` (second release within 0.6 s) brings a holding or landed aircraft to you; double tap again while it comes stops it. A single tap does nothing now (build 14's tap landed the aircraft 14 to 32 m away). Hold `K` is unchanged.
+
+## build 18 - 2026-11-26
+### Added
+- Mod Settings "Your seat": front left (pilot), front right, back left, back right (default). You fly from any seat: the flight keys and the pad are read directly, not through the driver controls. Right-hand seats get out on the right. The Atlus has no front right seat, so that choice takes the front left there.
+### Fixed
+- Take-off switches the vehicle on as well as the engine; the game only does that for a driver-seat mount.
+
+## build 17 - 2026-11-25
+### Changed
+- Mod Settings "Fly the NCPD Night Hunter", off by default. Off, the mod leaves that vehicle alone and it drives as its quest mod ships it. The author found it broken under the mod's controller; the cause was not looked into.
+
+Builds 17 to 19 compile on 2.5 (0 errors; the 7 warnings come from other mods) and are not flown yet. The two publication changes below are kept.
+
 ## Changes made for publication - 2026-11-24
 - The charter arrival time uses its formula again (dispatch distance over cruise speed plus 30 seconds, between 40 and 300 seconds). A fixed 10 seconds had been left in from testing.
 - The debug log is off by default.

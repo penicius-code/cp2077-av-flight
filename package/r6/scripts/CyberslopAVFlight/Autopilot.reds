@@ -10,6 +10,10 @@
 //   let-down over the pin it sinks to 40 m over everything within 40 m (map) and looks for a flat, open spot from
 //            there (the charter arrival's test), first at the height of the surface under the pin.
 //   descent  it moves over the spot and comes straight down. The system's touchdown test ends it.
+//   fetch    build 19 (double tap of the call key): the system gives the spot at V's feet and the heading (door side
+//            towards V). Cruise = known buildings on the way + 15 m and at least 25 m over the spot (no 60 m rule),
+//            no let-down search: straight down over the spot, turning to the heading, not under 8 m before it is
+//            turned (the hull must not sweep over V).
 // Same logic as tools\sim_route.py, which flies it over the real height map with the radar at 300 m, 60 m and off.
 // Version 1 (build 8) had only the radar and flew into buildings in game: the rays did not report them in time.
 module CyberslopAVFlight
@@ -87,6 +91,10 @@ public class AVFAutopilot extends IScriptable {
   private let m_zLow: Float;       // let-down altitude over the pin
   private let m_zLowKnown: Bool;
   private let m_phaseT: Float;
+  // build 19: fetch (fixed spot and landing heading)
+  private let m_fetch: Bool;
+  private let m_hx: Float;
+  private let m_hy: Float;
 
   public func Init(gi: GameInstance) -> Void {
     this.m_gi = gi;
@@ -133,6 +141,17 @@ public class AVFAutopilot extends IScriptable {
     this.m_zLowKnown = false;
     this.m_phaseT = 0.0;
     this.cruiseZ = pos.Z;
+    this.m_fetch = false;
+  }
+
+  // Build 19: fly to the spot the system found at V's feet and land there with heading fwd.
+  public func StartFetch(spot: Vector4, fwd: Vector4, pos: Vector4, fl: ref<AVFFlight>) -> Void {
+    this.Start(spot, pos, fl);
+    this.spot = spot;
+    this.hasSpot = true;
+    this.m_fetch = true;
+    this.m_hx = fwd.X;
+    this.m_hy = fwd.Y;
   }
 
   public func Stop() -> Void {
@@ -362,8 +381,13 @@ public class AVFAutopilot extends IScriptable {
         } else {
           this.blind = this.m_unknown * 2 > this.m_samples;
           this.cruiseZ = MaxF(pos.Z, this.top + 15.0);
-          if fl.aglValid {
-            this.cruiseZ = MaxF(this.cruiseZ, fl.groundZ + 60.0);
+          if this.m_fetch {
+            // build 19: a hop to V: over what the map knows + 15 m and 25 m over the spot (radar and map stay on)
+            this.cruiseZ = MaxF(this.cruiseZ, this.spot.Z + 25.0);
+          } else {
+            if fl.aglValid {
+              this.cruiseZ = MaxF(this.cruiseZ, fl.groundZ + 60.0);
+            };
           };
         };
         this.phase = 1;
@@ -398,9 +422,11 @@ public class AVFAutopilot extends IScriptable {
         this.m_mapT = 0.25;
         this.MapAhead(pos, fx, fy, fl.vfNow, climb);
       };
-      // never under 40 m over the ground below; 20 m higher for as long as the radar sees something ahead
-      if fl.aglValid && fl.agl < 30.0 {
-        this.cruiseZ = MaxF(this.cruiseZ, fl.groundZ + 40.0);
+      // never under 40 m over the ground below (build 19: 25 m on a hop to V); 20 m higher for as long as the radar
+      // sees something ahead
+      let minAgl: Float = this.m_fetch ? 25.0 : 40.0;
+      if fl.aglValid && fl.agl < minAgl - 10.0 {
+        this.cruiseZ = MaxF(this.cruiseZ, fl.groundZ + minAgl);
       };
       if this.m_blocked {
         this.cruiseZ = MaxF(this.cruiseZ, pos.Z + 20.0);
@@ -426,10 +452,17 @@ public class AVFAutopilot extends IScriptable {
       cmd.vf = s * MaxF(0.0, CosF(ang));
       cmd.yaw = dh > 3.0 ? ClampF(1.5 * ang, -m.yawRate, m.yawRate) : 0.0;
       if dh < 4.0 && fl.speed < 2.5 {
-        this.phase = 4;
-        this.m_phaseT = 0.0;
-        this.LowAlt();
-        this.note = "autopilot over the pin at " + FloatToStringPrec(pos.Z, 0) + " m, letting down to " + (this.m_zLowKnown ? FloatToStringPrec(this.m_zLow, 0) + " m" : "radar-altimeter range");
+        if this.m_fetch {
+          // build 19: spot and heading are known: straight down from here
+          this.phase = 3;
+          this.m_phaseT = 0.0;
+          this.note = "fetch: over the spot at " + FloatToStringPrec(pos.Z, 0) + " m, coming down to " + FloatToStringPrec(this.spot.Z, 0) + " m";
+        } else {
+          this.phase = 4;
+          this.m_phaseT = 0.0;
+          this.LowAlt();
+          this.note = "autopilot over the pin at " + FloatToStringPrec(pos.Z, 0) + " m, letting down to " + (this.m_zLowKnown ? FloatToStringPrec(this.m_zLow, 0) + " m" : "radar-altimeter range");
+        };
       };
       return 0;
     };
@@ -482,6 +515,14 @@ public class AVFAutopilot extends IScriptable {
     cmd.vl = ClampF(0.6 * (dx * fy - dy * fx), -3.0, 3.0);
     let h: Float = fl.aglValid ? fl.agl - restH : 60.0;
     cmd.vz = -AVFFlight.Flare(h, descent, vs);
+    if this.m_fetch {
+      // build 19: turn to the landing heading (door side towards V) on the way down; not under 8 m before that
+      let herr: Float = AtanF(this.m_hx * fy - this.m_hy * fx, this.m_hx * fx + this.m_hy * fy);
+      cmd.yaw = ClampF(1.5 * herr, -m.yawRate, m.yawRate);
+      if AbsF(herr) > 0.14 && h < 8.0 {
+        cmd.vz = ClampF(0.8 * (8.0 - h), 0.0, 2.0);
+      };
+    };
     if this.m_phaseT > 300.0 {
       this.reason = "Autopilot: the descent took too long. Holding here.";
       return 2;

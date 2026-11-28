@@ -1,8 +1,9 @@
 // Cyberslop AV Flight 1.0.0 - raw input through Codeware's callback system.
 // Key-targeted callbacks: only the listed keys ever reach script (mouse moves and every other key stay native).
 // The pilot callbacks exist only while V sits in the pilot seat of a flyable vehicle; the on-foot callback
-// listens to two keys only (call key, board key). Build 16: the L3 + R3 gamepad chord is gone (V 2026-11-22);
+// listens to two keys only (call key, board key). Build 16: the L3 + R3 gamepad chord is gone (2026-11-22);
 // keys changed in Mod Settings re-register at once (AVFSettings.OnModSettingsChange -> AVFSystem.OnKeysChanged).
+// Build 19: double tap of the call key on foot = the AV comes to V (AVFSystem.OnCallDoubleTap); single tap unused.
 module CyberslopAVFlight
 
 public class AVFHoldCheck extends DelayCallback {
@@ -55,6 +56,8 @@ public class AVFInput extends IScriptable {
   // on foot
   private let m_callHeld: Bool;
   private let m_callSince: Float;
+  private let m_tapArmed: Bool;     // build 19: a first tap is waiting for its second
+  private let m_tapAt: Float;
   private let m_l3: Bool;
   private let m_r3: Bool;
   private let m_token: Int32;
@@ -118,6 +121,7 @@ public class AVFInput extends IScriptable {
     };
     this.m_footOn = false;
     this.m_callHeld = false;
+    this.m_tapArmed = false;
     this.m_l3 = false;
     this.m_r3 = false;
   }
@@ -152,7 +156,9 @@ public class AVFInput extends IScriptable {
         this.Diag("call key down");
       };
       this.lastPad = false;
-      // a tap (released within 0.4 s): an aircraft holding in the air lands; the hold (0.8 s) stays call / send away
+      // a tap = released within 0.4 s; the hold (0.8 s) stays call / confirm / send away.
+      // Build 19 (2026-11-28): a DOUBLE tap (second release within 0.6 s of the first) = "come to me"; a single
+      // tap does nothing any more (build 14's single-tap landing is gone, no accidental landings).
       let tap: Bool = !pressed && this.m_callHeld && this.Now() - this.m_callSince < 0.4 && !this.Paused();
       if pressed && !this.m_callHeld {
         this.m_callSince = this.Now();
@@ -161,8 +167,18 @@ public class AVFInput extends IScriptable {
       if pressed {
         this.ScheduleHold(false);
       };
-      if tap && IsDefined(this.m_sys) {
-        this.m_sys.OnCallTap();
+      if tap {
+        let now: Float = this.Now();
+        if this.m_tapArmed && now - this.m_tapAt < 0.6 {
+          this.m_tapArmed = false;
+          this.Diag("call key double tap");
+          if IsDefined(this.m_sys) {
+            this.m_sys.OnCallDoubleTap();
+          };
+        } else {
+          this.m_tapArmed = true;
+          this.m_tapAt = now;
+        };
       };
       return false;
     };

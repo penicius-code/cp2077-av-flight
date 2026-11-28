@@ -1,7 +1,7 @@
 # Cyberslop AV Flight
 
 Charter and fly aircraft in Cyberpunk 2077: a fly-by-wire flight controller, paid charter and an autopilot to the tracked map pin. Single-player only.
-Version 1.0.0 build 16 | For game version 2.5 | Status: builds 7, 8, 9, 11 and 13 flown in game; builds 12 and 14 to 16 compile and are not yet flown; installing from this repository has not been tested on a clean setup
+Version 1.0.0 build 19 | For game version 2.5 | Status: builds 7, 8, 9, 11 and 13 flown in game; builds 12 and 14 to 19 compile and are not yet flown; installing from this repository has not been tested on a clean setup
 
 **Download:** [latest release](https://github.com/penicius-code/cp2077-av-flight/releases/latest) (zip; install steps below)
 
@@ -99,7 +99,7 @@ Compiler note: `HeightMap.reds` is one large file (485 KB). The redscript compil
 
 ## Controls
 
-Active only in the pilot seat. All keys can be changed on the settings page.
+Active in the seat you board (Mod Settings, "Your seat"; default back right); the Night Hunter only from its driver seat. All keys can be changed on the settings page.
 
 | Action | Keyboard | Gamepad |
 |---|---|---|
@@ -109,11 +109,12 @@ Active only in the pilot seat. All keys can be changed on the settings page.
 | Hover brake | `Left Shift` (while held, `A` / `D` slide and `W` / `S` creep) | hold `A` / Cross |
 | Get out | `F`, landed only | `B` / Circle |
 | Autopilot to the tracked pin | hold `G` 0.5 s | hold D-pad up 0.5 s |
-| Call / send away, on foot | hold `K` 0.8 s; tap `K` to land a hovering aircraft near you | - |
+| Call / send away, on foot | hold `K` 0.8 s | - |
+| Bring the aircraft to you, on foot | double tap `K`: it lands about 3 m from you, door side towards you; double tap again while it comes to stop it | - |
 
 ## Configuration
 
-Mod Settings page "Cyberslop AV Flight": aircraft to call, price scale, fuel price, damage liability, livery; speed limit, gamepad throttle mode, invert climb stick, allow getting out in the air, vertical speed, autopilot speed; engine volume; control hints and units; keys; a debug log switch (off).
+Mod Settings page "Cyberslop AV Flight": aircraft to call, your seat, fly the NCPD Night Hunter (off by default), price scale, fuel price, damage liability, livery; speed limit, gamepad throttle mode, invert climb stick, allow getting out in the air, vertical speed, autopilot speed; engine volume; control hints and units; keys; a debug log switch (off).
 
 ## Status
 
@@ -127,6 +128,9 @@ Mod Settings page "Cyberslop AV Flight": aircraft to call, price scale, fuel pri
 | 12 | Radio fix. Not flown. |
 | 13 | Hover hold after getting out in the air: works. |
 | 14, 15, 16 | Tap-to-land, departure climb, small fixes. Not flown. |
+| 17 | NCPD Night Hunter flight controls off by default (the author found it broken under the mod's controller; the cause was not looked into). Not flown. |
+| 18 | Seat choice. Not flown. |
+| 19 | Landing at your feet, automatic door, smooth touchdown, getting out in the air drops you beside the hull, double tap to fetch. Not flown. |
 
 Checked for this repository on 2026-11-24:
 - `tools/dav_heightmap.py` and `tools/gen.py`, run on the original inputs, reproduce the installed `HeightMap.reds`, `Data.reds` and `avflight.yaml` byte for byte.

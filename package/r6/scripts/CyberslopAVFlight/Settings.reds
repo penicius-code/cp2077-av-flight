@@ -1,4 +1,5 @@
 // Cyberslop AV Flight 1.0.0 - settings (Mod Settings > Cyberslop AV Flight) and shared types.
+// Build 18 (2026-11-26): Flight > "Your seat" (default back right).
 module CyberslopAVFlight
 
 public class AVFModel {
@@ -49,6 +50,14 @@ public enum AVFHints {
   Auto = 0,
   Always = 1,
   Off = 2
+}
+
+// Build 18: the seat V takes when boarding a charter (the slot names of DAV's model table).
+public enum AVFSeat {
+  FrontLeft = 0,
+  FrontRight = 1,
+  BackLeft = 2,
+  BackRight = 3
 }
 
 // Liveries, in the order of AVFParts.Livery.
@@ -234,6 +243,22 @@ public class AVFSettings extends ScriptableSystem {
 
   @runtimeProperty("ModSettings.mod", "Cyberslop AV Flight")
   @runtimeProperty("ModSettings.category", "Flight")
+  @runtimeProperty("ModSettings.displayName", "Your seat")
+  @runtimeProperty("ModSettings.description", "Where you sit when you board a charter. You fly it from any seat; the other seats stay empty. Used the next time you board. The Atlus has no front right seat: there you take the front left one.")
+  @runtimeProperty("ModSettings.displayValues.FrontLeft", "Front left (pilot)")
+  @runtimeProperty("ModSettings.displayValues.FrontRight", "Front right")
+  @runtimeProperty("ModSettings.displayValues.BackLeft", "Back left")
+  @runtimeProperty("ModSettings.displayValues.BackRight", "Back right")
+  public let seat: AVFSeat = AVFSeat.BackRight;
+
+  @runtimeProperty("ModSettings.mod", "Cyberslop AV Flight")
+  @runtimeProperty("ModSettings.category", "Flight")
+  @runtimeProperty("ModSettings.displayName", "Fly the NCPD Night Hunter")
+  @runtimeProperty("ModSettings.description", "Off: the Night Hunter keeps its own hover-tank controls, this mod does not touch it. On: Space / Left Ctrl climb and descend it like a charter AV.")
+  public let flyNightHunter: Bool = false;
+
+  @runtimeProperty("ModSettings.mod", "Cyberslop AV Flight")
+  @runtimeProperty("ModSettings.category", "Flight")
   @runtimeProperty("ModSettings.displayName", "Vertical speed (%)")
   @runtimeProperty("ModSettings.description", "Climb and descent rate of your own flying and of the autopilot, as a share of each aircraft's real figure (Excalibur at 100 %: 10 m/s up, 7 m/s down). The landing flare near the ground stays gentle.")
   @runtimeProperty("ModSettings.step", "25")
@@ -292,7 +317,7 @@ public class AVFSettings extends ScriptableSystem {
   @runtimeProperty("ModSettings.category", "Keys")
   @runtimeProperty("ModSettings.category.order", "5")
   @runtimeProperty("ModSettings.displayName", "Call / send away (hold, on foot)")
-  @runtimeProperty("ModSettings.description", "Hold 0.8 s for a quote, hold again to confirm. Hold while an AV waits for you to send it away. Tap while an aircraft holds in the air: it lands near you (tap again: it holds). Keyboard only.")
+  @runtimeProperty("ModSettings.description", "Hold 0.8 s for a quote, hold again to confirm. Hold while an AV waits for you to send it away. Double tap: your AV comes to you and lands at your feet, door towards you, from the air or from where it landed (double tap again on its way: it holds in the air). Keyboard only.")
   public let keyCall: EInputKey = EInputKey.IK_K;
 
   @runtimeProperty("ModSettings.mod", "Cyberslop AV Flight")

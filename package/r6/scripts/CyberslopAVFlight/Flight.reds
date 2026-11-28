@@ -263,10 +263,12 @@ public class AVFFlight extends IScriptable {
   // ---------------------------------------------------------------- control law
 
   // Sink rate (positive) for a descent to a touchdown, h metres over the resting height: the asked rate far up,
-  // a constant deceleration below that, 0.45 x height near the ground, 0.15 m/s at the ground.
+  // a constant deceleration below that, 0.45 x height near the ground, 0.4 m/s for the last 0.9 m.
+  // Build 19: 0.4 m/s (was 0.15): a steady, soft sink onto the gear that the contact test (AVFSystem.Touchdown)
+  // can tell from standing on the ground within 0.12 s, instead of a creep over the last 30 cm.
   public final static func Flare(h: Float, descent: Float, vs: Float) -> Float {
     let aLim: Float = 3.5 * (0.5 + 0.5 * MaxF(vs, 0.5));
-    return MaxF(0.15, MinF(descent, MinF(0.45 * h, SqrtF(2.0 * 0.6 * aLim * MaxF(h, 0.0)))));
+    return MaxF(0.4, MinF(descent, MinF(0.45 * h, SqrtF(2.0 * 0.6 * aLim * MaxF(h, 0.0)))));
   }
 
   private func Approach(cur: Float, tgt: Float, step: Float) -> Float {

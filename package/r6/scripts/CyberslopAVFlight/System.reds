@@ -1,4 +1,12 @@
 // Cyberslop AV Flight 1.0.0 - charter, pilot and Night Hunter state machine.
+// Build 19 (2026-11-28): the charter lands with its door side (left) towards V, the hull side about 3 m from V's
+// feet, on the flattest ground there (FindSpot); it turns to that heading high up and comes straight down. Touchdown by
+// gear contact (Touchdown), not by a remembered resting height: no more creeping / twitching just above the ground.
+// The front-left door opens when V walks up and closes when V walks off or the AV takes off. Getting out in the air
+// drops V beside the hull (it used to leave V on the roof). Double tap of the call key on foot = "come to me": the AV
+// comes from where it holds in the air or from where it landed (OnCallDoubleTap); the single tap is gone.
+// Build 18 (2026-11-26): the board key seats V in the seat from Mod Settings ("Your seat", default back right) and V
+// flies the charter from there; right-hand seats get out on the right; take-off switches the vehicle on as well.
 // Build 16 (2026-11-23, bug hunt minors): a pad with the radio / vehicle list or a menu open no longer flies (stick and A
 // neutral), call / board / pilot keys changed in Mod Settings apply at once, the "holding until you are on foot" note
 // shows for every charter, an abandoned or destroyed charter's bill shares one message with the reason, the restored
@@ -149,6 +157,14 @@ public class AVFSystem extends ScriptableSystem {
   private let m_wreckT: Float;
   private let m_mileageDone: Bool;
   private let m_exitTeleport: Bool;
+  private let m_exitAir: Bool;       // build 19: that exit was in the air: V is dropped beside the hull
+  private let m_seatRight: Bool;     // build 18: V boarded a right-hand seat (exit point mirrored)
+  private let m_spotFwd: Vector4;    // build 19: heading the arrival lands with (door side towards V)
+  private let m_doorT: Float;        // build 19: door check cooldown
+  private let m_tdOn: Bool;          // build 19: touchdown contact test (see Touchdown)
+  private let m_tdRef: Float;
+  private let m_tdStall: Float;
+  private let m_tdSteady: Float;
   private let m_restAGL: Float;
   private let m_restMeasureT: Float;
   private persistent let p_open: Bool;
@@ -194,7 +210,7 @@ public class AVFSystem extends ScriptableSystem {
   private let m_hoverModel: ref<AVFModel>;
   private let m_hoverNH: Bool;
   private let m_hoverChkT: Float;
-  private let m_hoverLand: Bool;     // the held aircraft is flying to a landing spot (tap of the call key)
+  private let m_hoverLand: Bool;     // the held aircraft is flying to V (build 19: double tap of the call key)
 
   // ---------------------------------------------------------------- lifecycle
 
@@ -530,7 +546,7 @@ public class AVFSystem extends ScriptableSystem {
   }
 
   private func CallKeyName() -> String {
-    return this.KeyLabel(this.m_settings.keyCall);   // build 16: the L3 + R3 chord was removed (V 2026-11-22)
+    return this.KeyLabel(this.m_settings.keyCall);   // build 16: the L3 + R3 chord was removed (2026-11-22)
   }
 
   private func KeyLabel(k: EInputKey) -> String {
@@ -582,47 +598,91 @@ public class AVFSystem extends ScriptableSystem {
     this.StartTick();   // the tick also shows the message on the mod's own panel
   }
 
-  // Tap of the call key on foot: the aircraft holding in the air (charter or Night Hunter) flies to an open spot
-  // near V and lands there (the autopilot's route, let-down and spot search, flown unmanned by TickHover).
-  // No open spot near V, or V more than 400 m away: it lands below where it holds. A second tap: it holds again.
-  public func OnCallTap() -> Void {
-    if !this.m_hoverOn || this.PlayerInVehicle() {
+  // Build 19 (2026-11-28): DOUBLE tap of the call key on foot = "come to me". The AV holding in the air, or the
+  // charter standing landed somewhere else, flies to V and lands at V's feet with its door side towards V (FindSpot).
+  // Flown unmanned by TickHover: the autopilot's route (StartFetch: fixed spot + heading), the contact touchdown.
+  // Double tap again while it comes: it stops and holds in the air. Replaces build 14's single tap (it landed 14-32 m
+  // away, or under itself; the single tap does nothing now). No open spot at V's feet: it stays where it is.
+  public func OnCallDoubleTap() -> Void {
+    let p: ref<PlayerPuppet> = this.Player();
+    if !IsDefined(p) || this.PlayerInVehicle() {
       return;
     };
-    let veh: ref<VehicleObject> = this.m_hoverVeh;
-    let m: ref<AVFModel> = this.m_hoverModel;
-    if !IsDefined(veh) || !IsDefined(m) {
-      return;
-    };
-    if this.m_hoverLand {
+    let keyName: String = this.KeyLabel(this.m_settings.keyCall);
+    if this.m_hoverOn && this.m_hoverLand {
       this.m_hoverLand = false;
       this.m_auto.Stop();
-      this.m_hud.Message("Your " + m.name + " holds its position again. Land: tap " + this.KeyLabel(this.m_settings.keyCall) + ".", 4.0);
-      this.Log("hover landing called off by V");
+      this.m_hud.Message("Your " + this.m_hoverModel.name + " holds its position. Come to me: double tap " + keyName + ".", 4.0);
+      this.Log("fetch called off by V: holding in the air");
+      this.StartTick();
       return;
     };
-    let pos: Vector4 = veh.GetWorldPosition();
-    let dest: Vector4 = new Vector4(pos.X, pos.Y, pos.Z, 1.0);
+    let veh: ref<VehicleObject>;
+    let m: ref<AVFModel>;
+    let fromGround: Bool = false;
+    if this.m_hoverOn {
+      veh = this.m_hoverVeh;
+      m = this.m_hoverModel;
+    } else {
+      if Equals(this.m_state, AVFState.EnRoute) || Equals(this.m_state, AVFState.Arriving) {
+        this.m_hud.Message("Your " + this.m_model.name + " is already on its way to you.", 4.0);
+        this.StartTick();
+        return;
+      };
+      if Equals(this.m_state, AVFState.Parked) {
+        veh = this.AV();
+        m = this.m_model;
+        fromGround = true;
+      };
+    };
+    if !IsDefined(veh) || !IsDefined(m) {
+      if Equals(this.m_state, AVFState.None) {
+        this.m_hud.Message("No AV out. Call one: hold " + keyName + ".", 4.0);
+        this.StartTick();
+      };
+      return;
+    };
+    if fromGround && this.NearEntry(veh, p) {
+      this.m_hud.Message("Your " + m.name + " is right here. Board: " + this.KeyLabel(this.m_settings.keyBoard) + ".", 4.0);
+      this.StartTick();
+      return;
+    };
     let spot: Vector4;
-    let near: Bool = false;
-    let p: ref<PlayerPuppet> = this.Player();
-    if IsDefined(p) && this.HDist(pos, p.GetWorldPosition()) < 400.0 {
-      near = this.FindSpot(m, spot);
+    let fwd: Vector4;
+    if !this.FindSpot(m, spot, fwd) {
+      this.m_hud.Message("No open, flat spot at your feet for your " + m.name + ". Step into the open and double tap " + keyName + " again.", 6.0);
+      this.Log("fetch: no landing spot near V");
+      this.StartTick();
+      return;
     };
-    if near {
-      dest = spot;
+    if fromGround {
+      // lift off from where it landed: the controller flies it unmanned, like an aircraft V left in the air
+      if !this.m_flight.Bind(veh, m) {
+        return;
+      };
+      this.CloseDoor(veh);
+      this.m_flight.Engage();
+      veh.TurnVehicleOn(true);
+      veh.TurnEngineOn(true);
+      this.m_thrustSent = -1.0;
+      this.m_volSent = -100.0;
+      if !this.StartHover(veh, m, false) {
+        this.m_flight.Disengage();
+        veh.TurnEngineOn(false);
+        this.Log("fetch: the flight controller did not take it");
+        return;
+      };
     };
+    let pos: Vector4 = veh.GetWorldPosition();
     this.m_flight.UpdateAGL(0.0, true);
-    this.m_auto.Start(dest, pos, this.m_flight);
+    this.m_auto.StartFetch(spot, fwd, pos, this.m_flight);
     this.m_hoverLand = true;
     this.m_blockOn = false;
     this.m_blockT = 0.0;
-    if near {
-      this.m_hud.Message("Your " + m.name + " is coming down to land near you.", 5.0);
-    } else {
-      this.m_hud.Message("No open landing zone near you: your " + m.name + " lands below where it holds.", 6.0);
-    };
-    this.Log("hover landing: " + (near ? "spot " + FloatToStringPrec(this.HDist(spot, p.GetWorldPosition()), 0) + " m from V, " : "no spot near V, landing below itself, ") + FloatToStringPrec(this.HDist(dest, pos), 0) + " m to fly, now at " + FloatToStringPrec(pos.Z, 0) + " m");
+    this.ResetTouchdown();
+    this.m_awayT = 0.0;
+    this.m_hud.Message("Your " + m.name + " is coming to you.", 5.0);
+    this.Log("fetch: " + (fromGround ? "from the ground" : "from the air") + ", spot " + FloatToStringPrec(this.HDist(spot, p.GetWorldPosition()), 1) + " m from V (hull centre), " + FloatToStringPrec(this.HDist(spot, pos), 0) + " m to fly, now at " + FloatToStringPrec(pos.Z, 0) + " m, spot at " + FloatToStringPrec(spot.Z, 0) + " m");
     this.StartTick();
   }
 
@@ -690,17 +750,25 @@ public class AVFSystem extends ScriptableSystem {
     this.StartTick();
   }
 
-  // An open spot near V: flat ground, open sky, nothing in the footprint. Prefers the direction V faces.
-  private func FindSpot(m: ref<AVFModel>, out spot: Vector4) -> Bool {
+  // Build 19 (2026-11-28): a landing spot at V's feet. The aircraft lands side-on to V with its door side (left,
+  // DAV's door: seat_front_left on every model) towards V: hull side 3 m from V first, then 5.5 m, both at V's own
+  // level; then the old rings (14 / 22 / 32 m from V, any level within 6 m). Eight directions per ring, V's facing
+  // first. Each candidate: open sky over its middle and both ends, its whole footprint (the hull's real outline, not
+  // a circle) on ground within 1 m; the flattest one wins, so it sits level and the door meets the ground.
+  // fwd = the heading it lands with: its right side points away from V.
+  private func FindSpot(m: ref<AVFModel>, out spot: Vector4, out fwd: Vector4) -> Bool {
     let p: ref<PlayerPuppet> = this.Player();
     if !IsDefined(p) {
       return false;
     };
     let pos: Vector4 = p.GetWorldPosition();
-    let fwd: Vector4 = p.GetWorldForward();
-    let base: Float = AtanF(fwd.Y, fwd.X);
+    let pf: Vector4 = p.GetWorldForward();
+    let base: Float = AtanF(pf.Y, pf.X);
+    let side: Float = m.width * 0.5;
     let rr: Float = MaxF(m.length, m.width) * 0.5 + 1.0;
     let radii: array<Float>;
+    ArrayPush(radii, side + 3.0);
+    ArrayPush(radii, side + 5.5);
     ArrayPush(radii, MaxF(14.0, rr + 6.0));
     ArrayPush(radii, MaxF(22.0, rr + 12.0));
     ArrayPush(radii, MaxF(32.0, rr + 20.0));
@@ -713,23 +781,71 @@ public class AVFSystem extends ScriptableSystem {
     ArrayPush(offs, 2.356);
     ArrayPush(offs, -2.356);
     ArrayPush(offs, 3.1416);
+    let found: Bool = false;
+    let done: Bool = false;
+    let bestScore: Float = 1000000.0;
+    let bestDev: Float = 10.0;
+    let bestR: Float = 0.0;
+    let ri: Int32 = 0;
     for r in radii {
+      if done {
+        break;
+      };
+      let oi: Int32 = 0;
       for o in offs {
         let a: Float = base + o;
-        if this.CheckSpot(pos.X + r * CosF(a), pos.Y + r * SinF(a), pos.Z, rr, spot) {
-          return true;
+        let ux: Float = CosF(a);
+        let uy: Float = SinF(a);
+        // right = u (away from V), so forward = u turned 90 degrees to the left
+        let f: Vector4 = new Vector4(-uy, ux, 0.0, 0.0);
+        let s: Vector4;
+        let dev: Float;
+        if this.CheckSpot(pos.X + r * ux, pos.Y + r * uy, pos.Z, f, m, ri < 2, s, dev) {
+          let score: Float = dev * 4.0 + Cast<Float>(ri) * 0.5 + Cast<Float>(oi) * 0.05;
+          if !found || score < bestScore {
+            found = true;
+            bestScore = score;
+            bestDev = dev;
+            bestR = r;
+            spot = s;
+            fwd = f;
+          };
+          if ri == 0 && dev <= 0.12 {
+            done = true;   // flat, right at V's feet, in the first directions: take it
+            break;
+          };
         };
+        oi += 1;
       };
+      // close rings: the flattest of both unless the first had a flat one; the far rings: the first ring with any
+      if found && (ri >= 2 || ri == 1 && bestDev <= 0.35) {
+        done = true;
+      };
+      ri += 1;
     };
-    return false;
+    if found {
+      this.Log("landing spot: hull centre " + FloatToStringPrec(bestR, 1) + " m from V, ground within " + FloatToStringPrec(bestDev, 2) + " m over the footprint");
+    };
+    return found;
   }
 
-  private func CheckSpot(cx: Float, cy: Float, pz: Float, rr: Float, out spot: Vector4) -> Bool {
+  // DAV's collision boxes: the Valgus / Mayhem tail reaches 15 m behind the origin (nose 9.4 m); the others are
+  // about symmetric.
+  private func RearExt(m: ref<AVFModel>) -> Float {
+    if Equals(m.key, "valgus") || Equals(m.key, "mayhem") {
+      return 15.0;
+    };
+    return m.length * 0.5;
+  }
+
+  // One candidate (centre cx / cy, heading f). close: only ground at V's own level (+-1.2 m) counts.
+  // dev = how far the ground under the footprint differs from the ground under the centre.
+  private func CheckSpot(cx: Float, cy: Float, pz: Float, f: Vector4, m: ref<AVFModel>, close: Bool, out spot: Vector4, out dev: Float) -> Bool {
     let hit: TraceResult;
     if !this.Ray(new Vector4(cx, cy, pz + 20.0, 1.0), new Vector4(cx, cy, pz - 20.0, 1.0), hit) {
       return false;
     };
-    if hit.normal.Z < 0.94 || AbsF(hit.position.Z - pz) > 6.0 {
+    if hit.normal.Z < 0.94 || AbsF(hit.position.Z - pz) > (close ? 1.2 : 6.0) {
       return false;
     };
     let gz: Float = hit.position.Z;
@@ -737,26 +853,176 @@ public class AVFSystem extends ScriptableSystem {
     if this.Ray(new Vector4(cx, cy, gz + 1.0, 1.0), new Vector4(cx, cy, gz + 120.0, 1.0), sky) {
       return false;
     };
+    let front: Float = m.length * 0.5 + 0.8;
+    let rear: Float = this.RearExt(m) + 0.8;
+    let hw: Float = m.width * 0.5 + 0.5;
+    let rx: Float = f.Y;
+    let ry: Float = -f.X;
+    // it comes straight down: open sky over both ends too
+    let e: Int32 = 0;
+    while e < 2 {
+      let lf: Float = e == 0 ? front * 0.85 : -rear * 0.85;
+      let ex: Float = cx + f.X * lf;
+      let ey: Float = cy + f.Y * lf;
+      let skyE: TraceResult;
+      if this.Ray(new Vector4(ex, ey, gz + 1.5, 1.0), new Vector4(ex, ey, gz + 40.0, 1.0), skyE) {
+        return false;
+      };
+      e += 1;
+    };
+    // the footprint: four corners and the middle of both long sides, ground within 1 m of the centre's
+    dev = 0.0;
     let k: Int32 = 0;
-    while k < 4 {
-      let ka: Float = Cast<Float>(k) * 1.5708;
-      let x: Float = cx + rr * CosF(ka);
-      let y: Float = cy + rr * SinF(ka);
+    while k < 6 {
+      let lr: Float = (k % 2 == 0) ? -hw : hw;
+      let lf2: Float = k < 2 ? front : (k < 4 ? -rear : 0.0);
+      let x: Float = cx + rx * lr + f.X * lf2;
+      let y: Float = cy + ry * lr + f.Y * lf2;
       let h2: TraceResult;
       if !this.Ray(new Vector4(x, y, gz + 8.0, 1.0), new Vector4(x, y, gz - 4.0, 1.0), h2) || AbsF(h2.position.Z - gz) > 1.0 {
         return false;
       };
+      dev = MaxF(dev, AbsF(h2.position.Z - gz));
       k += 1;
     };
     spot = new Vector4(cx, cy, gz, 1.0);
     return true;
   }
 
+  // Build 19: V stands under the hull (its real outline + margin), below it and less than 15 m down.
+  private func VUnderHull(veh: ref<VehicleObject>, m: ref<AVFModel>, margin: Float) -> Bool {
+    let p: ref<PlayerPuppet> = this.Player();
+    if !IsDefined(p) || !IsDefined(veh) || !IsDefined(m) {
+      return false;
+    };
+    let pp: Vector4 = p.GetWorldPosition();
+    let vp: Vector4 = veh.GetWorldPosition();
+    if pp.Z >= vp.Z || vp.Z - pp.Z > 15.0 {
+      return false;
+    };
+    let fw: Vector4 = veh.GetWorldForward();
+    let fl: Float = MaxF(SqrtF(fw.X * fw.X + fw.Y * fw.Y), 0.05);
+    let fx: Float = fw.X / fl;
+    let fy: Float = fw.Y / fl;
+    let dx: Float = pp.X - vp.X;
+    let dy: Float = pp.Y - vp.Y;
+    let lf: Float = dx * fx + dy * fy;
+    let lr: Float = dx * fy - dy * fx;
+    return lf < m.length * 0.5 + margin && lf > -(this.RearExt(m) + margin) && AbsF(lr) < m.width * 0.5 + margin;
+  }
+
+  // Build 19: angle from the hull's heading to the wanted heading h (rad, positive = turn right).
+  private func HeadingErr(veh: ref<VehicleObject>, h: Vector4) -> Float {
+    if AbsF(h.X) + AbsF(h.Y) < 0.01 {
+      return 0.0;
+    };
+    let fw: Vector4 = veh.GetWorldForward();
+    let fl: Float = MaxF(SqrtF(fw.X * fw.X + fw.Y * fw.Y), 0.05);
+    let fx: Float = fw.X / fl;
+    let fy: Float = fw.Y / fl;
+    return AtanF(h.X * fy - h.Y * fx, h.X * fx + h.Y * fy);
+  }
+
+  // Build 19: touchdown by gear contact. A descent has been asked for (vz under -0.2 m/s) for 0.4 s, close to the
+  // ground (under 3 m over the remembered resting height), and the hull has not sunk 1 cm for 0.12 s: it stands on
+  // its gear, hand it back to the game now. Builds 8-18 waited for 4 cm over a remembered resting height that jumped
+  // between landings (0.66 / 1.00 m): too high = let go and dropped, too low = pushed into the ground for 0.7 s
+  // before the blocked test fired (the twitch V saw). Also down when it is 0.4 m under that resting height.
+  private func ResetTouchdown() -> Void {
+    this.m_tdOn = false;
+    this.m_tdStall = 0.0;
+    this.m_tdSteady = 0.0;
+  }
+
+  private func Touchdown(dt: Float, vzCmd: Float, h: Float, z: Float) -> Bool {
+    // 3 m, like the old blocked test: the resting height of the bigger models was never measured (0.6 m assumed)
+    if vzCmd > -0.2 || h > 3.0 {
+      this.ResetTouchdown();
+      return false;
+    };
+    this.m_tdSteady += dt;
+    if h < -0.4 && this.m_tdSteady >= 0.2 {
+      return true;
+    };
+    if !this.m_tdOn || z < this.m_tdRef - 0.01 {
+      this.m_tdOn = true;
+      this.m_tdRef = z;
+      this.m_tdStall = 0.0;
+      return false;
+    };
+    this.m_tdStall += dt;
+    return this.m_tdSteady >= 0.4 && this.m_tdStall >= 0.12;
+  }
+
+  // Build 19 (2026-11-28): the front-left door (every charter model has it; DAV opened it the same way) opens when
+  // V walks up to the aircraft and closes when V walks off; take-off and every unmanned flight close it.
+  private func DoorState(veh: ref<VehicleObject>) -> VehicleDoorState {
+    let ps: ref<VehicleComponentPS> = veh.GetVehiclePS();
+    if !IsDefined(ps) {
+      return VehicleDoorState.Closed;
+    };
+    return ps.GetDoorState(EVehicleDoor.seat_front_left);
+  }
+
+  private func SendDoor(veh: ref<VehicleObject>, open: Bool) -> Void {
+    let ps: ref<VehicleComponentPS> = veh.GetVehiclePS();
+    if !IsDefined(ps) {
+      return;
+    };
+    if open {
+      let evo: ref<VehicleDoorOpen> = new VehicleDoorOpen();
+      evo.slotID = n"seat_front_left";
+      evo.shouldAutoClose = false;
+      evo.forceScene = false;
+      GameInstance.GetPersistencySystem(this.m_gi).QueuePSEvent(ps.GetID(), ps.GetClassName(), evo);
+    } else {
+      let evc: ref<VehicleDoorClose> = new VehicleDoorClose();
+      evc.slotID = n"seat_front_left";
+      evc.forceScene = false;
+      GameInstance.GetPersistencySystem(this.m_gi).QueuePSEvent(ps.GetID(), ps.GetClassName(), evc);
+    };
+    this.Log("door " + (open ? "opened" : "closed"));
+  }
+
+  private func CloseDoor(veh: ref<VehicleObject>) -> Void {
+    if IsDefined(veh) && Equals(this.DoorState(veh), VehicleDoorState.Open) {
+      this.SendDoor(veh, false);
+    };
+  }
+
+  private func TickDoor(dt: Float, veh: ref<VehicleObject>, p: ref<PlayerPuppet>) -> Void {
+    this.m_doorT -= dt;
+    if this.m_doorT > 0.0 {
+      return;
+    };
+    this.m_doorT = 0.25;
+    if this.m_hoverOn || this.m_flight.engaged && Equals(this.m_flight.vehID, veh.GetEntityID()) {
+      return;   // flying (held in the air or coming to V)
+    };
+    let e: Vector4 = this.LocalToWorld(veh, this.m_model.entry);
+    let pp: Vector4 = p.GetWorldPosition();
+    let d: Float = this.HDist(e, pp);
+    let dz: Float = AbsF(e.Z - pp.Z);
+    let st: VehicleDoorState = this.DoorState(veh);
+    if d <= this.m_model.entryRadius + 2.5 && dz < 3.5 {
+      if Equals(st, VehicleDoorState.Closed) {
+        this.SendDoor(veh, true);
+        this.m_doorT = 1.0;
+      };
+    } else {
+      if (d > this.m_model.entryRadius + 4.0 || dz > 4.5) && Equals(st, VehicleDoorState.Open) {
+        this.SendDoor(veh, false);
+        this.m_doorT = 1.0;
+      };
+    };
+  }
+
   private func TrySpawn() -> Void {
     this.EnsureRadio();
     let m: ref<AVFModel> = this.m_model;
     let spot: Vector4;
-    if !this.FindSpot(m, spot) {
+    let spotFwd: Vector4;
+    if !this.FindSpot(m, spot, spotFwd) {
       if !this.m_noSpotNotified {
         this.m_hud.Message("Your " + m.name + " has no open landing zone near you. Get to open ground (hold " + this.CallKeyName() + " to cancel).", 6.0);
         this.m_noSpotNotified = true;
@@ -766,6 +1032,8 @@ public class AVFSystem extends ScriptableSystem {
       return;
     };
     this.m_spot = spot;
+    this.m_spotFwd = spotFwd;   // build 19: the heading it lands with (door side towards V)
+    this.ResetTouchdown();
     // fly in from the depot side on a clear line, or come straight down from above
     let dx: Float = this.m_depot.X - spot.X;
     let dy: Float = this.m_depot.Y - spot.Y;
@@ -837,6 +1105,7 @@ public class AVFSystem extends ScriptableSystem {
       return;
     };
     this.EndHover(false, "sent away");   // a charter left hovering departs from where it is
+    this.CloseDoor(veh);                 // build 19
     let pp: Vector4 = this.Player().GetWorldPosition();
     let vp: Vector4 = veh.GetWorldPosition();
     let dx: Float = this.m_depot.X - vp.X;
@@ -947,12 +1216,13 @@ public class AVFSystem extends ScriptableSystem {
     if !IsDefined(veh) || !IsDefined(p) || !this.NearEntry(veh, p) {
       return;
     };
+    let seat: CName = this.ChosenSeat(this.m_model);
     let mountData: ref<MountEventData> = new MountEventData();
     mountData.isInstant = false;
-    mountData.slotName = n"seat_front_left";
+    mountData.slotName = seat;
     mountData.mountParentEntityId = veh.GetEntityID();
     let slot: MountingSlotId;
-    slot.id = n"seat_front_left";
+    slot.id = seat;
     let info: MountingInfo;
     info.childId = p.GetEntityID();
     info.parentId = veh.GetEntityID();
@@ -961,7 +1231,27 @@ public class AVFSystem extends ScriptableSystem {
     req.lowLevelMountingInfo = info;
     req.mountData = mountData;
     GameInstance.GetMountingFacility(this.m_gi).Mount(req);
-    this.Log("board");
+    this.Log("board " + NameToString(seat));
+  }
+
+  // Build 18: the seat from Mod Settings (2026-11-26, design goal: "always sits in the back right seat"). The flight input is raw
+  // (Codeware key / axis callbacks), so V flies from any seat. Seat lists from DAV's model table: every charter has
+  // all four seats except the Atlus (front left, back left, back right): front right falls back to the pilot seat there.
+  private func ChosenSeat(m: ref<AVFModel>) -> CName {
+    let s: AVFSeat = IsDefined(this.m_settings) ? this.m_settings.seat : AVFSeat.BackRight;
+    if Equals(s, AVFSeat.FrontRight) {
+      if IsDefined(m) && Equals(m.key, "atlus") {
+        return n"seat_front_left";
+      };
+      return n"seat_front_right";
+    };
+    if Equals(s, AVFSeat.BackLeft) {
+      return n"seat_back_left";
+    };
+    if Equals(s, AVFSeat.BackRight) {
+      return n"seat_back_right";
+    };
+    return n"seat_front_left";
   }
 
   private func NearEntry(veh: ref<VehicleObject>, p: ref<PlayerPuppet>) -> Bool {
@@ -972,11 +1262,16 @@ public class AVFSystem extends ScriptableSystem {
 
   public func OnPlayerMounted(veh: ref<VehicleObject>, slot: CName) -> Void {
     this.Log("diag mounted " + TDBID.ToStringDEBUG(veh.GetRecordID()) + " slot " + NameToString(slot));
-    if !Equals(slot, n"seat_front_left") {
+    // build 18: the charter is flown from whatever seat V boarded (Mod Settings "Your seat"); any other vehicle
+    // (the Night Hunter) only from the driver seat, as before
+    let charter: Bool = EntityID.IsDefined(this.m_avID) && Equals(veh.GetEntityID(), this.m_avID);
+    if !charter && !Equals(slot, n"seat_front_left") {
       return;
     };
     this.EnsureRadio();
-    if EntityID.IsDefined(this.m_avID) && Equals(veh.GetEntityID(), this.m_avID) {
+    if charter {
+      // right-hand seats get out on the right: the exit point is mirrored (DAV's exit points are the left side)
+      this.m_seatRight = Equals(slot, n"seat_front_right") || Equals(slot, n"seat_back_right");
       this.m_isNH = false;
       this.m_pilotModel = this.m_model;
       this.m_state = AVFState.Piloting;
@@ -1000,6 +1295,11 @@ public class AVFSystem extends ScriptableSystem {
       return;
     };
     let nh: ref<AVFModel> = this.NightHunterModel();
+    if IsDefined(nh) && veh.GetRecordID() == nh.record && !this.m_settings.flyNightHunter {
+      // build 17: the Night Hunter keeps its own hover-tank controls unless the setting is on
+      this.Log("Night Hunter: flight controls off (Mod Settings), left to the vehicle");
+      return;
+    };
     if IsDefined(nh) && veh.GetRecordID() == nh.record {
       this.m_isNH = true;
       this.m_pilotModel = nh;
@@ -1074,18 +1374,21 @@ public class AVFSystem extends ScriptableSystem {
       };
       this.m_hud.Hide();
       if holds {
-        this.m_hud.Message("The Night Hunter holds its position. Land: tap " + this.KeyLabel(this.m_settings.keyCall) + ".", 5.0);
+        this.m_hud.Message("The Night Hunter holds its position. Bring it to you: double tap " + this.KeyLabel(this.m_settings.keyCall) + ".", 5.0);
       };
       this.Log("left the Night Hunter" + (holds ? " in the air" : ""));
       return;
     };
     if Equals(this.m_state, AVFState.Piloting) {
       this.m_state = AVFState.Parked;
-      this.m_exitTeleport = !wasAirborne;
+      // build 19: in the air too: the game's exit left V standing on the roof of the holding aircraft (2026-11-28),
+      // now V is put beside the hull and falls from there (TickParked)
+      this.m_exitTeleport = true;
+      this.m_exitAir = wasAirborne;
       this.m_restMeasureT = wasAirborne ? 0.0 : 1.5;
       this.m_awayT = 0.0;
       if holds {
-        this.m_hud.Message("Your " + this.m_model.name + " holds its position. Land: tap " + this.KeyLabel(this.m_settings.keyCall) + ". Send away: hold " + this.CallKeyName() + ".", 6.0);
+        this.m_hud.Message("Your " + this.m_model.name + " holds its position. Bring it to you: double tap " + this.KeyLabel(this.m_settings.keyCall) + ". Send away: hold " + this.CallKeyName() + ".", 6.0);
       };
       this.Log("left the AV" + (wasAirborne ? (holds ? " in the air" : " in the air, no hover hold") : ""));
     };
@@ -1172,10 +1475,9 @@ public class AVFSystem extends ScriptableSystem {
         this.m_hud.Message("Landing called off, your " + m.name + " holds its position. " + this.m_auto.reason, 6.0);
         this.Log("hover landing called off: " + this.m_auto.reason);
       } else {
-        // never come down on V: wait above while V stands under the hull
-        let p: ref<PlayerPuppet> = this.Player();
-        let vp: Vector4 = veh.GetWorldPosition();
-        if this.m_auto.Descending() && IsDefined(p) && cmd.vz < 0.0 && p.GetWorldPosition().Z < vp.Z && vp.Z - p.GetWorldPosition().Z < 15.0 && this.HDist(vp, p.GetWorldPosition()) < MaxF(m.length, m.width) * 0.5 + 2.0 {
+        // never come down on V: wait above while V stands under the hull. Build 19: the hull's real outline + 1 m
+        // (the old circle of half the length + 2 m would have stopped every landing 3 m from V's feet)
+        if this.m_auto.Descending() && cmd.vz < 0.0 && this.VUnderHull(veh, m, 1.0) {
           cmd.vz = 0.0;
         };
       };
@@ -1196,12 +1498,22 @@ public class AVFSystem extends ScriptableSystem {
     if !this.m_hoverNH {
       this.m_fuelL += LerpF(this.m_flight.powerFrac, m.burnHover, m.burnMax) / 60.0 * dt;
     };
-    // touchdown of a hover landing: the pilot's test (resting height, contact flag near the ground, blocked descent)
+    // touchdown when it comes to V. Build 19: the charter by gear contact (Touchdown); the Night Hunter (a hover tank
+    // that floats on its springs) keeps the old test (resting height, contact flag near the ground, blocked descent)
     if this.m_hoverLand {
       let h: Float = this.m_flight.aglValid ? this.m_flight.agl - restH : 50.0;
       let down: Bool = this.m_auto.Descending();
-      this.BlockedDescent(dt, down && cmd.vz < 0.0 && h < 3.0, veh.GetWorldPosition().Z);
-      if down && (h < (this.m_hoverNH ? 0.3 : 0.04) || this.m_flight.IsOnGround() && h < 0.15 || this.m_blockT > 0.7) && this.m_flight.vzNow > -1.5 && AbsF(this.m_flight.vfNow) < 1.5 {
+      let z: Float = veh.GetWorldPosition().Z;
+      let landed: Bool;
+      if this.m_hoverNH {
+        this.BlockedDescent(dt, down && cmd.vz < 0.0 && h < 3.0, z);
+        landed = down && (h < 0.3 || this.m_flight.IsOnGround() && h < 0.15 || this.m_blockT > 0.7);
+      } else {
+        landed = this.Touchdown(dt, (down && !cmd.holdAlt) ? cmd.vz : 0.0, h, z);
+      };
+      if landed && this.m_flight.vzNow > -1.5 && AbsF(this.m_flight.vfNow) < 1.5 {
+        this.Log("touchdown: " + FloatToStringPrec(h, 2) + " m over the resting height " + FloatToStringPrec(restH, 2) + " m");
+        this.ResetTouchdown();
         this.HoverLanded(veh);
         return;
       };
@@ -1238,9 +1550,10 @@ public class AVFSystem extends ScriptableSystem {
     } else {
       this.m_restMeasureT = 1.5;
       this.m_awayT = 0.0;
+      this.m_doorT = 0.0;   // build 19: the door opens at once when V stands next to it
       this.m_hud.Message("Your " + m.name + " has landed. Board: " + this.KeyLabel(this.m_settings.keyBoard) + " at the door. Send away: hold " + this.CallKeyName() + ".", 6.0);
     };
-    this.Log("hover landing: " + m.name + " landed");
+    this.Log("fetch: " + m.name + " landed");
   }
 
   // Exit blocked + saving locked while airborne (an autosave in the air would load V without the aircraft).
@@ -1479,15 +1792,31 @@ public class AVFSystem extends ScriptableSystem {
     // after getting out: stand V at the aircraft's exit point (DAV's exit), once the unmount is done
     if this.m_exitTeleport && !VehicleComponent.IsMountedToVehicle(this.m_gi, p) {
       this.m_exitTeleport = false;
-      let ex: Vector4 = this.LocalToWorld(veh, this.m_model.exitPoint);
+      let exLocal: Vector3 = this.m_model.exitPoint;
+      if this.m_exitAir {
+        // build 19: out in the air: beside the hull and clear of it (DAV's exit point is under the wing on the
+        // wider models), at the bottom of the hull; V falls from there instead of standing on the roof
+        exLocal = new Vector3(-(this.m_model.width * 0.5 + 1.3), 0.0, MinF(exLocal.Z, 0.0));
+      };
+      if this.m_seatRight {
+        exLocal = new Vector3(-exLocal.X, exLocal.Y, exLocal.Z);
+      };
+      let ex: Vector4 = this.LocalToWorld(veh, exLocal);
       let rot: EulerAngles = veh.GetWorldOrientation().ToEulerAngles();
       let face: EulerAngles;
-      face.Yaw = rot.Yaw + 90.0;
+      face.Yaw = this.m_seatRight ? rot.Yaw - 90.0 : rot.Yaw + 90.0;
       GameInstance.GetTeleportationFacility(this.m_gi).Teleport(p, ex, face);
+      if this.m_exitAir {
+        this.Log("out in the air: V dropped beside the hull, " + (this.m_flight.aglValid ? FloatToStringPrec(this.m_flight.agl, 0) + " m over the ground" : "no ground below"));
+      };
+      this.m_exitAir = false;
     };
     this.MeasureRest(dt);
+    this.TickDoor(dt, veh, p);
     let d: Float = this.HDist(veh.GetWorldPosition(), p.GetWorldPosition());
-    if d > 150.0 && !VehicleComponent.IsMountedToVehicle(this.m_gi, p) || d > 600.0 {
+    if this.m_hoverLand {
+      this.m_awayT = 0.0;   // build 19: on its way to V
+    } else if d > 150.0 && !VehicleComponent.IsMountedToVehicle(this.m_gi, p) || d > 600.0 {
       this.m_awayT += dt;
       if this.m_awayT > 60.0 {
         this.m_billPrefix = "Your charter left after waiting a minute without you. ";
@@ -1561,26 +1890,33 @@ public class AVFSystem extends ScriptableSystem {
       let ey: Float = this.m_spot.Y - pos.Y;
       cmd.vf = ClampF(0.6 * (ex * fx + ey * fy), -3.0, 3.0);
       cmd.vl = ClampF(0.6 * (ex * fy - ey * fx), -3.0, 3.0);
-      cmd.yaw = 0.0;
+      // build 19: turn to the landing heading (door side towards V) on the way down, done before 8 m
+      let herr: Float = this.HeadingErr(veh, this.m_spotFwd);
+      cmd.yaw = ClampF(1.5 * herr, -m.yawRate, m.yawRate);
       cmd.holdAlt = false;
       let h: Float = this.m_flight.aglValid ? this.m_flight.agl - this.m_restAGL : 20.0;
-      // flare to 0.15 m/s and hand back within 4 cm of the resting height: a hand-back higher up is a drop onto
-      // the suspension (the 16:20 arrival let go about 0.8 m up on the contact flag)
-      cmd.vz = -MaxF(0.15, MinF(m.descent * 0.7, 0.45 * h));
-      // blocked descent: asked to sink, not sinking, close to the ground = standing on it. Covers a resting
-      // height above the assumed one when the DLL's contact flag stays off (tools\sim_mission.py).
-      this.BlockedDescent(dt, h < 3.0, pos.Z);
+      // build 19: a steady 0.4 m/s at the end (was 0.15), touchdown by gear contact (Touchdown)
+      cmd.vz = -MaxF(0.4, MinF(m.descent * 0.7, 0.45 * h));
+      if AbsF(herr) > 0.14 && h < 8.0 {
+        cmd.vz = ClampF(0.8 * (8.0 - h), 0.0, 2.0);   // still turning: not lower than 8 m, the hull would sweep over V
+      };
+      if cmd.vz < 0.0 && this.VUnderHull(veh, m, 1.0) {
+        cmd.vz = 0.0;   // never come down on V
+      };
       if this.m_phaseT > 60.0 && h > 3.0 {
         this.AbortArrival("the descent timed out " + FloatToStringPrec(h, 0) + " m above the ground");
         return;
       };
-      if this.m_phaseT > 1.0 && (h < 0.04 || this.m_flight.IsOnGround() && h < 0.15 || this.m_blockT > 0.7) || this.m_phaseT > 60.0 {
+      if this.m_phaseT > 1.0 && this.Touchdown(dt, cmd.vz, h, pos.Z) || this.m_phaseT > 60.0 && !this.VUnderHull(veh, m, 0.5) {
+        this.Log("touchdown: " + FloatToStringPrec(h, 2) + " m over the resting height " + FloatToStringPrec(this.m_restAGL, 2) + " m, heading off by " + FloatToStringPrec(AbsF(herr) * 57.3, 0) + " deg");
+        this.ResetTouchdown();
         this.m_blockT = 0.0;
         this.m_flight.Disengage();
         veh.TurnEngineOn(false);
         this.m_state = AVFState.Parked;
         this.m_restMeasureT = 1.5;
         this.m_awayT = 0.0;
+        this.m_doorT = 0.0;
         this.m_hud.Message("Your " + m.name + " has landed. Board: " + this.KeyLabel(this.m_settings.keyBoard) + " at the door. Send away: hold " + this.CallKeyName() + ".", 6.0);
         this.Log("landed for V after " + FloatToStringPrec(this.m_phaseT, 1) + " s descent");
         return;
@@ -1938,6 +2274,12 @@ public class AVFSystem extends ScriptableSystem {
     } else {
       cmd.holdAlt = true;
     };
+    // build 19: controls let go just over the ground (under 0.5 m over the resting height), nearly stopped: it settles
+    // onto its gear by itself at 0.4 m/s instead of hanging there
+    if !this.m_isNH && !auto.on && cmd.holdAlt && h < 0.5 && AbsF(this.m_flight.vfNow) < 1.0 && AbsF(this.m_vSet) < 0.5 && this.m_airT > 2.0 {
+      cmd.holdAlt = false;
+      cmd.vz = -0.4;
+    };
     if auto.on {
       let vCruise: Float = MinF(Cast<Float>(s.autopilotSpeed) / 3.6, vmaxEff);
       let apResult: Int32 = auto.Step(dt, veh, m, this.m_flight, cmd, vCruise, restH, vs);
@@ -1976,12 +2318,22 @@ public class AVFSystem extends ScriptableSystem {
     };
 
     // touchdown
-    let margin: Float = this.m_isNH ? 0.3 : 0.04;
-    // the contact flag counts only near the ground (it also fires on a wall or a roof edge)
-    // blocked descent (see AutoArrive): descend held, not sinking, close to the ground
     let apDown: Bool = auto.Descending();
-    this.BlockedDescent(dt, (lift < -0.5 || apDown) && h < 3.0, veh.GetWorldPosition().Z);
-    if this.m_airT > 1.0 && (!auto.on || apDown) && lift <= 0.05 && (h < margin || this.m_flight.IsOnGround() && h < 0.15 || this.m_blockT > 0.7) && this.m_flight.vzNow > -1.5 && AbsF(this.m_flight.vfNow) < 1.5 {
+    let landed: Bool;
+    if this.m_isNH {
+      // the Night Hunter (hover tank on springs): the old test. The contact flag counts only near the ground (it
+      // also fires on a wall or a roof edge); blocked descent: descend held, not sinking, close to the ground
+      this.BlockedDescent(dt, (lift < -0.5 || apDown) && h < 3.0, veh.GetWorldPosition().Z);
+      landed = (!auto.on || apDown) && (h < 0.3 || this.m_flight.IsOnGround() && h < 0.15 || this.m_blockT > 0.7);
+    } else {
+      // build 19: the charter by gear contact (Touchdown): sinking asked for, and the hull stopped sinking
+      landed = this.Touchdown(dt, ((!auto.on || apDown) && !cmd.holdAlt) ? cmd.vz : 0.0, h, veh.GetWorldPosition().Z);
+    };
+    if this.m_airT > 1.0 && lift <= 0.05 && landed && this.m_flight.vzNow > -1.5 && AbsF(this.m_flight.vfNow) < 1.5 {
+      if !this.m_isNH {
+        this.Log("touchdown: " + FloatToStringPrec(h, 2) + " m over the resting height " + FloatToStringPrec(restH, 2) + " m");
+      };
+      this.ResetTouchdown();
       this.m_blockT = 0.0;
       this.Land(veh);
     };
@@ -2107,7 +2459,7 @@ public class AVFSystem extends ScriptableSystem {
     if this.m_hoverOn && !Equals(this.m_hoverID, veh.GetEntityID()) {
       // one flight controller for one aircraft
       if !this.m_hoverNH {
-        this.m_hud.Message("Air traffic control: your charter is holding in the air. Land it (tap " + this.KeyLabel(this.m_settings.keyCall) + " on foot) or send it away (hold) first.", 5.0);
+        this.m_hud.Message("Air traffic control: your charter is holding in the air. Bring it to you (double tap " + this.KeyLabel(this.m_settings.keyCall) + " on foot) or send it away (hold) first.", 5.0);
         this.m_takeoffT = -2.0;
         return;
       };
@@ -2123,6 +2475,9 @@ public class AVFSystem extends ScriptableSystem {
     };
     this.m_flight.Engage();
     if !this.m_isNH {
+      this.CloseDoor(veh);   // build 19: the door opened for boarding closes at take-off
+      // build 18: a passenger-seat mount never switches the vehicle's systems on (only the driver mount does)
+      veh.TurnVehicleOn(true);
       veh.TurnEngineOn(true);
       this.m_engineOffT = 0.0;
       this.m_thrustSent = -1.0;
@@ -2242,7 +2597,8 @@ public class AVFSystem extends ScriptableSystem {
         if IsDefined(av) && IsDefined(p) && this.NearEntry(av, p) {
           data = "Board " + this.m_model.name + ": " + this.KeyLabel(s.keyBoard);
         };
-        meter = "Charter " + AVFSystem.Eddies(this.MeterCost()) + " eb   (" + this.Clock(this.m_rentS) + ")   " + (this.m_hoverOn && !this.m_hoverNH ? (this.m_hoverLand ? "coming down to land   stop it: tap " + this.KeyLabel(s.keyCall) + "   " : "holding in the air   land: tap " + this.KeyLabel(s.keyCall) + "   ") : "") + "send away: hold " + this.CallKeyName();
+        // build 19: double tap = come to me (from the air or the ground); while it comes, double tap = hold
+        meter = "Charter " + AVFSystem.Eddies(this.MeterCost()) + " eb   (" + this.Clock(this.m_rentS) + ")   " + (this.m_hoverOn && !this.m_hoverNH ? (this.m_hoverLand ? "coming to you   stop it: double tap " + this.KeyLabel(s.keyCall) + "   " : "holding in the air   come to me: double tap " + this.KeyLabel(s.keyCall) + "   ") : "come to me: double tap " + this.KeyLabel(s.keyCall) + "   ") + "send away: hold " + this.CallKeyName();
         break;
       default:
         break;
